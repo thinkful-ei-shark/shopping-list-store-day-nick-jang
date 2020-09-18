@@ -1,19 +1,34 @@
+/* eslint-disable strict */
 const store = {
   items: [
-    { id: cuid(), name: 'apples', checked: false },
-    { id: cuid(), name: 'oranges', checked: false },
-    { id: cuid(), name: 'milk', checked: true },
-    { id: cuid(), name: 'bread', checked: false }
+    { id: cuid(), name: 'apples', checked: false, edit: { editting: false, currentText: 'apples' } },
+    { id: cuid(), name: 'oranges', checked: false, edit: { editting: false, currentText: 'oranges' } },
+    { id: cuid(), name: 'milk', checked: true, edit: { editting: false, currentText: 'milk' } },
+    { id: cuid(), name: 'bread', checked: false, edit: { editting: false, currentText: 'bread' } }
   ],
   hideCheckedItems: false
 };
 
 const generateItemElement = function (item) {
-  let itemTitle = `<span class='shopping-item shopping-item__checked'>${item.name}</span>`;
-  if (!item.checked) {
-    itemTitle = `
-     <span class='shopping-item'>${item.name}</span>
-    `;
+  let itemTitle = '';
+  let itemChecked = ' shopping-item__checked\'';
+  let itemTitleClass = 'class=\'shopping-item';
+  let itemInputClass = 'class=\'js-item-edit-text';
+
+  // Add a checked class if item is checked, otherwise close the single quote
+  item.checked ? itemTitleClass += itemChecked : itemTitleClass += '\'';
+  item.checked ? itemInputClass += itemChecked : itemInputClass += '\'';
+
+  // Add a textbox if item is being editted.
+  if (!item.edit.editting) {
+    itemTitle = `<span ${itemTitleClass}>${item.name}</span>`;
+  } else {
+    itemTitle =
+      `<form class='shopping-item' action='/some-server-endpoint' method='get'>
+      <label for='item-title'>Item Name:</label>
+      <input type='text' ${itemInputClass} name='item-title' value='${item.edit.currentText}' required />
+      <input type='submit' class='shopping-item-edit js-item-edit-submit' value='submit'>
+    </form>`;
   }
 
   return `
@@ -26,6 +41,9 @@ const generateItemElement = function (item) {
         <button class='shopping-item-delete js-item-delete'>
           <span class='button-label'>delete</span>
         </button>
+        <button class='shopping-item-edit js-item-edit'>
+          <span class='button-label'>edit</span>
+        </button>
       </div>
     </li>`;
 };
@@ -33,6 +51,19 @@ const generateItemElement = function (item) {
 const generateShoppingItemsString = function (shoppingList) {
   const items = shoppingList.map((item) => generateItemElement(item));
   return items.join('');
+};
+
+/**
+ * Get current texts in textboxes of currently 
+ * editting items, and store them.
+ */
+const storeItemsCurrentTexts = function () {
+  store.items.forEach(function (item, index) {
+    if (item.edit.editting) {
+      let currentText = $(`li[data-item-id='${item.id}']`).find('input.js-item-edit-text').val();
+      if (currentText) store.items[index].edit.currentText = currentText;
+    }
+  });
 };
 
 /**
@@ -63,7 +94,7 @@ const render = function () {
 };
 
 const addItemToShoppingList = function (itemName) {
-  store.items.push({ id: cuid(), name: itemName, checked: false });
+  store.items.push({ id: cuid(), name: itemName, checked: false, edit: { editting: false, currentText: itemName } });
 };
 
 const handleNewItemSubmit = function () {
@@ -72,6 +103,7 @@ const handleNewItemSubmit = function () {
     const newItemName = $('.js-shopping-list-entry').val();
     $('.js-shopping-list-entry').val('');
     addItemToShoppingList(newItemName);
+    storeItemsCurrentTexts();
     render();
   });
 };
@@ -85,6 +117,7 @@ const handleItemCheckClicked = function () {
   $('.js-shopping-list').on('click', '.js-item-toggle', event => {
     const id = getItemIdFromElement(event.currentTarget);
     toggleCheckedForListItem(id);
+    storeItemsCurrentTexts();
     render();
   });
 };
@@ -95,20 +128,21 @@ const getItemIdFromElement = function (item) {
     .data('item-id');
 };
 
+const getItemIndexFromElement = function (item) {
+  const id = getItemIdFromElement(item);
+  return store.items.findIndex(item => item.id === id);
+};
+
 /**
  * Responsible for deleting a list item.
- * @param {string} id 
+ * @param {string} index 
  */
-const deleteListItem = function (id) {
+const deleteListItem = function (index) {
   // As with 'addItemToShoppingLIst', this 
   // function also has the side effect of
   // mutating the global store value.
   //
-  // First we find the index of the item with 
-  // the specified id using the native
-  // Array.prototype.findIndex() method. 
-  const index = store.items.findIndex(item => item.id === id);
-  // Then we call `.splice` at the index of 
+  // We call `.splice` at the index of 
   // the list item we want to remove, with 
   // a removeCount of 1.
   store.items.splice(index, 1);
@@ -119,9 +153,11 @@ const handleDeleteItemClicked = function () {
   // we use event delegation.
   $('.js-shopping-list').on('click', '.js-item-delete', event => {
     // Get the index of the item in store.items.
-    const id = getItemIdFromElement(event.currentTarget);
+    const index = getItemIndexFromElement(event.currentTarget);
     // Delete the item.
-    deleteListItem(id);
+    deleteListItem(index);
+    // Update the store with current text in editting titles.
+    storeItemsCurrentTexts();
     // Render the updated shopping list.
     render();
   });
@@ -141,6 +177,56 @@ const toggleCheckedItemsFilter = function () {
 const handleToggleFilterClick = function () {
   $('.js-filter-checked').click(() => {
     toggleCheckedItemsFilter();
+    storeItemsCurrentTexts();
+    render();
+  });
+};
+
+/**
+ * Update the item's title and editting status
+ */
+const submitEditItem = function (item) {
+  const title = $(item).closest('.js-item-element').find('.js-item-edit-text').val();
+  const index = getItemIndexFromElement(item);
+
+  let storeItem = store.items[index];
+
+  storeItem.name = title;
+  // Turn off item's edit
+  storeItem.edit.editting = false;
+  storeItem.edit.currentText = title;
+};
+
+/**
+ * Places an event listener on the submit button
+ * for edits to title.
+ */
+const handleSubmitEditItem = function () {
+  $('.js-shopping-list').on('click', '.js-item-edit-submit', event => {
+    event.preventDefault();
+    submitEditItem(event.currentTarget);
+    storeItemsCurrentTexts();
+    render();
+  });
+};
+
+/**
+ * Toggles whether to create a text form to 
+ * enter the new title.
+ */
+const toggleEditItem = function (index) {
+  store.items[index].edit.editting = !store.items[index].edit.editting;
+};
+
+/**
+ * Places an event listener on the edit button
+ * to begin editting the title.
+ */
+const handleEditTitleClick = function () {
+  $('.js-shopping-list').on('click', '.js-item-edit', event => {
+    const index = getItemIndexFromElement(event.currentTarget);
+    toggleEditItem(index);
+    storeItemsCurrentTexts();
     render();
   });
 };
@@ -160,6 +246,8 @@ const handleShoppingList = function () {
   handleItemCheckClicked();
   handleDeleteItemClicked();
   handleToggleFilterClick();
+  handleEditTitleClick();
+  handleSubmitEditItem();
 };
 
 // when the page loads, call `handleShoppingList`
